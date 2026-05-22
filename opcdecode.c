@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <zstd.h>
+#include <signal.h>
 
 #define HEADER_SIZE         32
 #define COMP_BLOCK_SIZE      8
@@ -22,19 +23,23 @@ static double current_time_ms(void) {
 /* ── networking ──────────────────────────────────────────────────────────── */
 
 static int connect_opc(const char *ip, int port) {
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) { perror("socket"); exit(1); }
-
     struct sockaddr_in server = {
         .sin_family = AF_INET,
         .sin_port   = htons(port),
     };
     inet_pton(AF_INET, ip, &server.sin_addr);
 
-    if (connect(sock, (struct sockaddr *)&server, sizeof(server)) < 0) {
-        perror("connect"); exit(1);
+    while (1) {
+        int sock = socket(AF_INET, SOCK_STREAM, 0);
+        if (sock < 0) { perror("socket"); exit(1); }
+
+        if (connect(sock, (struct sockaddr *)&server, sizeof(server)) == 0)
+            return sock;
+
+        perror("connect failed, retrying in 5s");
+        close(sock);
+        sleep(5);
     }
-    return sock;
 }
 
 static void send_pixels(int sock, const uint8_t *data, uint32_t length) {
@@ -431,6 +436,7 @@ static void decode_fseq(const char *path, int sock) {
 /* ── entry point ─────────────────────────────────────────────────────────── */
 
 int main(int argc, char *argv[]) {
+    signal(SIGPIPE, SIG_IGN);
     const char *ip = "127.0.0.1";
     int port = 7890;
 
